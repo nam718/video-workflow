@@ -197,3 +197,7 @@ kling/      可灵服务集成
 ## License
 
 [MIT](./LICENSE)
+
+## 联系方式
+
+- 微信：`qw20gg`
