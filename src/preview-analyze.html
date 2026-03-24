@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>预览 — 节点输出在下方展示</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #1b1b2f; --bg2: #162447; --bg3: #1f4068;
+      --accent: #e94560; --text: #eee; --text2: #9aa; --border: #2a3a5a;
+      --success: #4caf50; --warning: #ff9800;
+      --node-bg: #1e2d4a; --node-border: #2e4a6a; --conn: #4a6a9a;
+    }
+    html, body { height: 100%; overflow: hidden; }
+    body { font-family: -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif; background: var(--bg); color: var(--text); }
+
+    .topbar {
+      height: 44px; background: var(--bg2); border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; padding: 0 12px; gap: 10px;
+    }
+    .topbar-title { font-size: 15px; font-weight: 700; color: var(--accent); }
+    .tb-label { font-size: 12px; color: var(--text2); margin-left: 12px; }
+    .badge { background: var(--accent); color: #fff; font-size: 10px; padding: 2px 8px; border-radius: 10px; margin-left: 8px; }
+
+    .canvas-area {
+      position: absolute; top: 44px; left: 0; right: 0; bottom: 0; overflow: auto;
+      background: radial-gradient(circle at 1px 1px, #2a3a5a22 1px, transparent 0);
+      background-size: 24px 24px;
+    }
+    .canvas-inner { position: absolute; top: 0; left: 0; transform: translate(20px, 20px) scale(0.70); transform-origin: 0 0; }
+
+    /* 连线层 */
+    .connections { position: absolute; top: 0; left: 0; width: 8000px; height: 3000px; pointer-events: none; }
+    .conn-line { fill: none; stroke: var(--conn); stroke-width: 2.5; stroke-dasharray: 6 3; opacity: .7; }
+    .conn-line.active { stroke: var(--success); opacity: 1; stroke-dasharray: none; }
+
+    /* 节点包装器 */
+    .node-wrapper { position: absolute; }
+
+    /* 节点卡片 */
+    .node {
+      position: relative; width: 260px;
+      background: var(--node-bg); border: 2px solid var(--node-border);
+      border-radius: 10px; user-select: none; box-shadow: 0 4px 20px #0004;
+    }
+    .node.done { border-color: var(--success); }
+    .node-header {
+      padding: 10px 14px; display: flex; align-items: center; gap: 8px;
+      border-bottom: 1px solid var(--border); border-radius: 10px 10px 0 0;
+      background: linear-gradient(135deg, #1e2d4a, #162447);
+    }
+    .node-icon { font-size: 18px; }
+    .node-name { font-size: 13px; font-weight: 600; flex: 1; }
+    .node-toggle { color: var(--text2); font-size: 14px; }
+    .node-status { width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
+    .node.done .node-status { background: var(--success); }
+    .node-body { padding: 10px 14px; font-size: 12px; color: var(--text2); }
+    .node-footer { padding: 8px 14px; border-top: 1px solid var(--border); display: flex; gap: 6px; }
+    .node-btn { flex: 1; padding: 5px 0; border: none; border-radius: 6px; font-size: 11px; text-align: center; }
+    .node-btn-primary { background: var(--accent); color: #fff; }
+    .node-btn-secondary { background: var(--bg3); color: var(--text); border: 1px solid var(--border); }
+
+    .port { position: absolute; width: 12px; height: 12px; border-radius: 50%; background: var(--conn); border: 2px solid var(--node-bg); }
+    .port-in { left: -7px; top: 28px; }
+    .port-out { right: -7px; top: 28px; }
+    .node.done .port { background: var(--success); }
+
+    /* 输出区 */
+    .node-output { margin-top: 8px; }
+    .output-pipe { width: 2px; height: 8px; background: var(--success); margin: 0 auto 0 30px; }
+    .output-columns { display: flex; gap: 6px; align-items: flex-start; }
+    .output-col { flex: 1; min-width: 130px; max-width: 200px; }
+    .output-col-head {
+      font-size: 11px; font-weight: 600; color: var(--accent);
+      padding: 4px 8px; background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 6px 6px 0 0; border-bottom: none;
+    }
+    .output-card {
+      background: var(--node-bg); border: 1px solid var(--node-border);
+      border-radius: 6px; padding: 6px 8px; margin-bottom: 4px; font-size: 11px; line-height: 1.4;
+    }
+    .output-card strong { color: var(--text); }
+    .output-card span { color: var(--text2); }
+
+    .shot-card {
+      background: var(--node-bg); border: 1px solid var(--node-border);
+      border-radius: 6px; padding: 8px 10px; margin-bottom: 5px; font-size: 11px; max-width: 360px;
+    }
+    .shot-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; }
+    .shot-num { background: var(--accent); color: white; padding: 1px 6px; border-radius: 8px; font-size: 10px; }
+    .shot-meta { font-size: 10px; color: var(--text2); }
+    .shot-meta span { margin-right: 6px; }
+
+    .script-output { max-width: 380px; }
+    .script-label { font-size: 11px; color: var(--text2); margin-bottom: 4px; }
+    .script-ta {
+      width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      color: #8f8; font-size: 12px; font-family: inherit; padding: 8px; min-height: 80px; resize: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <span class="topbar-title">🎬 视频工作流</span>
+    <span class="tb-label">📂 我的视频项目</span>
+    <span class="badge">预览 — 输出在节点下方按列排列</span>
+  </div>
+
+  <div class="canvas-area">
+    <div class="canvas-inner">
+      <svg class="connections">
+        <path class="conn-line active" d="M360,108 C410,108 430,108 480,108"/>
+        <path class="conn-line active" d="M740,108 C790,108 810,108 860,108"/>
+        <path class="conn-line" d="M1120,108 C1170,108 1190,108 1240,108"/>
+        <path class="conn-line active" d="M1500,108 C1550,108 1570,108 1620,108"/>
+        <path class="conn-line" d="M1880,108 C1930,108 1950,108 2000,108"/>
+      </svg>
+
+      <!-- ====== 节点1: 剧本 — 已完成，输出在下方 ====== -->
+      <div class="node-wrapper" style="left:100px; top:80px;">
+        <div class="node done">
+          <div class="port port-out"></div>
+          <div class="node-header">
+            <span class="node-icon">📝</span><span class="node-name">1. 剧本导入</span>
+            <span class="node-toggle">▲</span><span class="node-status"></span>
+          </div>
+          <div class="node-body">导入并审查剧本<div style="color:var(--success); margin-top:4px;">✓ 剧本已审查</div></div>
+          <div class="node-footer">
+            <button class="node-btn node-btn-secondary">📄 导入</button>
+            <button class="node-btn node-btn-primary">▶ 保存并审查</button>
+          </div>
+        </div>
+        <div class="node-output">
+          <div class="output-pipe"></div>
+          <div class="script-output">
+            <div class="script-label">📄 剧本内容</div>
+            <textarea class="script-ta" rows="5" readonly>第一幕 咖啡店
+
+清晨，阳光透过咖啡店的落地窗洒在木质吧台上。老王像往常一样在擦拭杯子。
+
+李明推门走进来，手里拎着他的银色笔记本电脑。他径直走向角落的老位置，放下电脑，从吧台端了一杯拿铁。
+
+"老王，今天还是老样子。"他说着打开电脑，皱眉看着屏幕上一堆报错信息。</textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- ====== 节点2: 分析 — 已完成，输出3列在下方 ====== -->
+      <div class="node-wrapper" style="left:480px; top:80px;">
+        <div class="node done">
+          <div class="port port-in"></div><div class="port port-out"></div>
+          <div class="node-header">
+            <span class="node-icon">🔍</span><span class="node-name">2. 角色·场景·道具</span>
+            <span class="node-toggle">▲</span><span class="node-status"></span>
+          </div>
+          <div class="node-body">提取角色、场景、道具<div style="color:var(--success); margin-top:4px;">✓ 3角色 4场景 3道具</div></div>
+          <div class="node-footer">
+            <button class="node-btn node-btn-primary">▶ 提取</button>
+          </div>
+        </div>
+        <div class="node-output">
+          <div class="output-pipe"></div>
+          <div class="output-columns">
+            <div class="output-col">
+              <div class="output-col-head">👤 角色 (3)</div>
+              <div class="output-card"><strong>李明</strong> <span>— 28岁程序员，戴黑框眼镜</span></div>
+              <div class="output-card"><strong>小雪</strong> <span>— 25岁设计师，长发白裙</span></div>
+              <div class="output-card"><strong>老王</strong> <span>— 50岁咖啡店老板，围棕围裙</span></div>
+            </div>
+            <div class="output-col">
+              <div class="output-col-head">🏠 场景 (4)</div>
+              <div class="output-card"><strong>咖啡店</strong> <span>— 复古风格，暖色灯光</span></div>
+              <div class="output-card"><strong>办公室</strong> <span>— 现代开放式工位</span></div>
+              <div class="output-card"><strong>城市街道</strong> <span>— 傍晚的梧桐树大道</span></div>
+              <div class="output-card"><strong>公园长椅</strong> <span>— 湖边木质长椅</span></div>
+            </div>
+            <div class="output-col">
+              <div class="output-col-head">🔧 道具 (3)</div>
+              <div class="output-card"><strong>笔记本电脑</strong> <span>— 银色MacBook</span></div>
+              <div class="output-card"><strong>拿铁咖啡</strong> <span>— 纸杯装</span></div>
+              <div class="output-card"><strong>素描本</strong> <span>— A4大小</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ====== 节点3: 参考图 — 未执行 ====== -->
+      <div class="node-wrapper" style="left:860px; top:80px;">
+        <div class="node">
+          <div class="port port-in"></div><div class="port port-out"></div>
+          <div class="node-header">
+            <span class="node-icon">🎨</span><span class="node-name">3. 参考图生成</span>
+            <span class="node-toggle">▼</span><span class="node-status"></span>
+          </div>
+          <div class="node-body">角色/场景/道具参考图</div>
+          <div class="node-footer">
+            <button class="node-btn node-btn-primary">▶ 全部生成</button>
+            <button class="node-btn node-btn-secondary">角色</button>
+            <button class="node-btn node-btn-secondary">场景</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ====== 节点4: 分镜 — 已完成，输出在下方 ====== -->
+      <div class="node-wrapper" style="left:1240px; top:80px;">
+        <div class="node done">
+          <div class="port port-in"></div><div class="port port-out"></div>
+          <div class="node-header">
+            <span class="node-icon">🎬</span><span class="node-name">4. 分镜规划</span>
+            <span class="node-toggle">▲</span><span class="node-status"></span>
+          </div>
+          <div class="node-body">自动分镜头与规划<div style="color:var(--success); margin-top:4px;">✓ 3 个分镜</div></div>
+          <div class="node-footer">
+            <button class="node-btn node-btn-primary">▶ 分镜</button>
+          </div>
+        </div>
+        <div class="node-output">
+          <div class="output-pipe"></div>
+          <div class="output-single">
+            <div class="shot-card">
+              <div class="shot-head"><span class="shot-num">镜头 1</span>
+                <div class="shot-meta"><span>📍咖啡店</span> <span>🎥中景</span> <span>⏱5s</span></div>
+              </div>
+              <div style="color:var(--text2);">李明坐在角落，面前放着一杯拿铁</div>
+              <div style="margin-top:2px;">他打开笔记本电脑，皱眉看着屏幕</div>
+            </div>
+            <div class="shot-card">
+              <div class="shot-head"><span class="shot-num">镜头 2</span>
+                <div class="shot-meta"><span>📍咖啡店</span> <span>🎥特写</span> <span>⏱5s</span></div>
+              </div>
+              <div style="color:var(--text2);">小雪推门走进来，手里抱着素描本</div>
+              <div style="margin-top:2px;">阳光从门口洒进来，映照在白裙上</div>
+            </div>
+            <div class="shot-card">
+              <div class="shot-head"><span class="shot-num">镜头 3</span>
+                <div class="shot-meta"><span>📍吧台</span> <span>🎥近景</span> <span>⏱5s</span></div>
+              </div>
+              <div style="color:var(--text2);">老王在吧台后面擦杯子</div>
+              <div style="margin-top:2px;">他微笑着看向走进来的小雪</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ====== 节点5: 提示词 — 未执行 ====== -->
+      <div class="node-wrapper" style="left:1620px; top:80px;">
+        <div class="node">
+          <div class="port port-in"></div><div class="port port-out"></div>
+          <div class="node-header">
+            <span class="node-icon">✨</span><span class="node-name">5. 提示词生成</span>
+            <span class="node-toggle">▼</span><span class="node-status"></span>
+          </div>
+          <div class="node-body">生成图片/视频提示词</div>
+          <div class="node-footer">
+            <button class="node-btn node-btn-primary">▶ 生成</button>
+            <button class="node-btn node-btn-secondary">💾 保存</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ====== 节点6: 即梦视频 ====== -->
+      <div class="node-wrapper" style="left:2000px; top:80px;">
+        <div class="node">
+          <div class="port port-in"></div>
+          <div class="node-header">
+            <span class="node-icon">🎥</span><span class="node-name">6. 即梦视频</span>
+            <span class="node-toggle">▼</span><span class="node-status"></span>
+          </div>
+          <div class="node-body">自动生成视频</div>
+          <div class="node-footer">
+            <button class="node-btn node-btn-primary">▶ 生成视频</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
