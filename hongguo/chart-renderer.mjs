@@ -2,7 +2,7 @@
  * chart-renderer.mjs - PPT风格动画图表渲染器
  *
  * 使用 ECharts + Playwright 生成动画数据图表视频片段
- * 输出: 1080×1080 MP4 视频（匹配 ai-video-maker 的视频区域）
+ * 输出: 1080×1080 MP4 视频（匹配 3-make-video 的视频区域）
  *
  * 图表:
  *   1. 赛道K线热度图 — 各标签烛台+成交量柱

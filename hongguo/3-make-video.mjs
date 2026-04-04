@@ -10,7 +10,7 @@
  *
  * v3新增: PPT风格动画图表（K线热度图 + 红海蓝海矩阵）
  *
- * 用法: node hongguo/ai-video-maker.mjs
+ * 用法: node hongguo/3-make-video.mjs
  */
 
 import fs from 'fs';
