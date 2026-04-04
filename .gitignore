@@ -11,7 +11,9 @@ test-preview/
 images/
 chrome-win/
 MediaCrawler/
-hongguo/
+hongguo/*
+!hongguo/*.mjs
+!hongguo/data/
 juchacha/
 juchacha-ai-rank.mjs
 radar-app/

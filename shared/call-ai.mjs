@@ -373,6 +373,93 @@ function extractImageFromContent(content) {
 }
 
 /**
+ * 调用AI — 视觉模式（发送图片给大模型分析）
+ * @param {string} prompt - 提示词
+ * @param {string[]} imagePaths - 图片文件路径数组
+ * @param {object} [options] - 选项
+ * @param {string} [options.systemPrompt] - 系统提示词
+ * @param {number} [options.maxRetries=3] - 最大重试次数
+ * @param {number} [options.maxTokens=4096] - 最大token
+ * @param {number} [options.timeout=180000] - 超时毫秒
+ * @returns {Promise<string>} AI返回的文本
+ */
+export async function callAIVision(prompt, imagePaths, options = {}) {
+  const { apiUrl, apiKey, model } = getAIConfig();
+  if (!apiUrl || !apiKey) {
+    throw new Error('请先在设置中配置AI API地址和密钥');
+  }
+
+  const {
+    systemPrompt = '你是一个专业的短视频内容分析师。',
+    maxRetries = 3,
+    maxTokens = 4096,
+    timeout = 180000,
+  } = options;
+
+  // 构建多模态消息：图片(base64) + 文本
+  const contentParts = [];
+  for (const imgPath of imagePaths) {
+    const imgBuf = fs.readFileSync(imgPath);
+    const ext = path.extname(imgPath).toLowerCase();
+    const mime = ext === '.png' ? 'image/png' : 'image/jpeg';
+    const b64 = imgBuf.toString('base64');
+    contentParts.push({
+      type: 'image_url',
+      image_url: { url: `data:${mime};base64,${b64}` },
+    });
+  }
+  contentParts.push({ type: 'text', text: prompt });
+
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: contentParts },
+  ];
+
+  let lastError;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), timeout);
+    try {
+      const url = normalizeApiBase(apiUrl) + '/v1/chat/completions';
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          max_tokens: maxTokens,
+          temperature: 0.7,
+        }),
+        signal: ac.signal,
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text();
+        throw new Error(`Vision API错误 ${resp.status}: ${errText}`);
+      }
+
+      const data = await resp.json();
+      const content = data.choices?.[0]?.message?.content;
+      if (!content) throw new Error('Vision API返回空内容');
+      return content;
+    } catch (err) {
+      lastError = err;
+      const reason = err.name === 'AbortError' ? `Vision API超时(${timeout/1000}s)` : err.message;
+      console.error(`Vision调用失败(第${attempt + 1}次): ${reason}`);
+      if (attempt < maxRetries - 1) {
+        await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastError;
+}
+
+/**
  * 调用图片生成API（自动适配 images/generations 和 chat/completions 两种模式）
  * @param {string} prompt - 图片描述提示词
  * @param {object} [options] - 选项
