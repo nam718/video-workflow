@@ -60,10 +60,20 @@ function extractKeyframes(videoPath, count = 5) {
   for (let i = 0; i < count; i++) {
     const ts = start + interval * i;
     const outPath = path.join(frameDir, `frame_${String(i).padStart(3, '0')}.jpg`);
-    run(
-      `ffmpeg -y -ss ${ts.toFixed(2)} -i "${videoPath}" ` +
-      `-frames:v 1 -q:v 2 -vf "scale=960:-2" "${outPath}" 2>/dev/null`
-    );
+    try {
+      run(
+        `ffmpeg -y -ss ${ts.toFixed(2)} -i "${videoPath}" ` +
+        `-frames:v 1 -q:v 2 -vf "scale=960:-2" "${outPath}" 2>/dev/null`
+      );
+    } catch {
+      // JPEG编码失败时尝试不带scale
+      try {
+        run(
+          `ffmpeg -y -ss ${ts.toFixed(2)} -i "${videoPath}" ` +
+          `-frames:v 1 -q:v 2 "${outPath}" 2>/dev/null`
+        );
+      } catch { /* 跳过无法提取的帧 */ }
+    }
     if (fs.existsSync(outPath)) framePaths.push(outPath);
   }
 
