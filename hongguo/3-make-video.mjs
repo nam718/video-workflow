@@ -286,7 +286,7 @@ async function buildSmartScript(items, rankDate, analysisMap) {
   } catch (err) {
     console.error(`  ❌ AI解说生成失败: ${err.message}`);
     console.log('  ⚠️ 回退到模板文案...');
-    return buildScript(items, rankDate);
+    return { segments: buildScript(items, rankDate), chartNarrations: new Map() };
   }
 
   // 解析AI返回的文案
@@ -738,13 +738,10 @@ async function makeChartSegment(seg, outPath, ttsDur) {
     : 1.0;
 
   const filters = [
-    // 图表视频放入视频区
-    `[0:v]scale=1080:1080:force_original_aspect_ratio=decrease,pad=1080:1080:(1080-iw)/2:(1080-ih)/2:black[_vid]`,
-    `[_vid]pad=${W}:${H}:0:${TOP_BAR}:black[_canvas]`,
-    // 上栏
-    ...topBarFilters('[_canvas]', videoTitleLabel, videoDateLabel),
-    // 字幕
-    ...subFilters('[_topbar]', cues, SUB_Y, 48),
+    // 图表视频全屏显示（Remotion已输出1080x1920）
+    `[0:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(${W}-iw)/2:(${H}-ih)/2:black[_canvas]`,
+    // 字幕（底部区域）
+    ...subFilters('[_canvas]', cues, SUB_Y, 48),
   ];
 
   // 如果需要拉伸音频，添加 atempo 滤镜
