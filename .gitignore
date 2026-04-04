@@ -1,6 +1,8 @@
 node_modules/
 dist/
 dist-*/
+hongguo/remotion/out/
+hongguo/remotion/src/generated/
 .jimeng_profile/
 .project-history.json
 _state.json

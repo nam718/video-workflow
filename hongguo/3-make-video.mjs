@@ -16,7 +16,6 @@
 import fs from 'fs';
 import path from 'path';
 import { execSync, exec } from 'child_process';
-import { renderCharts, analyzeAllTags } from './chart-renderer.mjs';
 import { analyzeAllClips } from './clip-analyzer.mjs';
 import { callAI } from '../shared/call-ai.mjs';
 
@@ -26,6 +25,8 @@ const VIDEO_DIR = path.join(SCRIPT_DIR, 'videos');
 const TEMP_DIR  = path.join(SCRIPT_DIR, '.tmp_ai_video');
 const CLIP_DIR  = path.join(SCRIPT_DIR, 'clips_ai');
 const SFX_DIR   = path.join(SCRIPT_DIR, 'sfx');
+const REMOTION_DIR = path.join(SCRIPT_DIR, 'remotion');
+const REMOTION_OUT_DIR = path.join(REMOTION_DIR, 'out');
 const CN_FONT   = '/System/Library/AssetsV2/com_apple_MobileAsset_Font8/86ba2c91f017a3749571a82f2c6d890ac7ffb2fb.asset/AssetData/PingFang.ttc';
 
 // 布局常量
@@ -1044,6 +1045,165 @@ async function makeSpeedVersion(inputPath, outputPath) {
   );
 }
 
+/* ==================== Remotion 图表渲染 ==================== */
+
+const REMOTION_TAG_RULES = [
+  { name: '古风', pattern: /古风|古装|国风|古偶/ },
+  { name: '仙侠玄幻', pattern: /仙侠|武侠|玄幻|修仙/ },
+  { name: '恐怖惊悚', pattern: /恐怖|惊悚|克苏鲁|诡/ },
+  { name: '末日丧尸', pattern: /末日|丧尸/ },
+  { name: '搞笑轻喜', pattern: /搞笑|抽象|喜剧|女频/ },
+  { name: '言情甜宠', pattern: /言情|恋爱|甜宠|强制爱/ },
+  { name: 'IP改编', pattern: /白雪公主|童话|赵云|三国|西游|霍去病|海贼王|成龙历险记/ },
+  { name: '历史正剧', pattern: /历史|正剧/ },
+  { name: '大女主', pattern: /大女主|女性成长|女性穿越|独立女性|杀夫证道/ },
+  { name: '打脸虐渣', pattern: /打脸|虐渣|复仇|恶毒女配|剧情反转/ },
+  { name: '总裁豪门', pattern: /总裁|霸总|豪门/ },
+  { name: '逆袭', pattern: /逆袭|翻身|扮猪吃虎/ },
+  { name: '穿越', pattern: /穿越/ },
+  { name: '师徒', pattern: /师徒|师姐|师父/ },
+  { name: '现代都市', pattern: /现代|都市|日常/ },
+  { name: '虐恋', pattern: /虐恋|虐心/ },
+];
+
+function analyzeRemotionTags(items) {
+  const tagMap = new Map();
+  for (const rule of REMOTION_TAG_RULES) {
+    tagMap.set(rule.name, { name: rule.name, count: 0, totalHeat: 0, totalLikes: 0, totalShares: 0 });
+  }
+  for (const item of items) {
+    const title = item.title || '';
+    for (const rule of REMOTION_TAG_RULES) {
+      if (!rule.pattern.test(title)) continue;
+      const target = tagMap.get(rule.name);
+      target.count += 1;
+      target.totalHeat += Number(item.heat_score || 0);
+      target.totalLikes += Number(item.liked_count || 0);
+      target.totalShares += Number(item.share_count || 0);
+    }
+  }
+  return [...tagMap.values()]
+    .filter(tag => tag.count > 0)
+    .map(tag => ({
+      ...tag,
+      avgHeat: Math.round(tag.totalHeat / tag.count),
+      avgLikes: Math.round(tag.totalLikes / tag.count),
+      avgShares: Math.round(tag.totalShares / tag.count),
+    }));
+}
+
+function analyzeAllTags(items) {
+  const tags = analyzeRemotionTags(items);
+  const overallAvgHeat = tags.length ? tags.reduce((sum, t) => sum + t.avgHeat, 0) / tags.length : 0;
+  return { tags, overallAvgHeat, totalItems: items.length };
+}
+
+function buildDarkHorseData(items, rankDate) {
+  const now = new Date(`${rankDate}T00:00:00+08:00`).getTime() / 1000;
+  return items
+    .filter(item => Number(item.create_time || 0) > 0)
+    .map(item => {
+      const days = Math.max(1, (now - Number(item.create_time)) / 86400);
+      const dailyEngagement = Math.round((Number(item.liked_count || 0) + Number(item.share_count || 0)) / days);
+      return { ...item, days: Number(days.toFixed(1)), dailyEngagement };
+    })
+    .sort((a, b) => b.dailyEngagement - a.dailyEngagement)
+    .slice(0, 8);
+}
+
+function buildOceanData(items) {
+  const tags = analyzeRemotionTags(items);
+  const overallAvgHeat = tags.length ? tags.reduce((sum, tag) => sum + tag.avgHeat, 0) / tags.length : 0;
+  const sortedCounts = tags.map(tag => tag.count).sort((a, b) => a - b);
+  const medianCount = sortedCounts[Math.floor(sortedCounts.length / 2)] || 2;
+  const countThreshold = Math.max(medianCount + 1, 3);
+  return tags.map(tag => {
+    const competition = tag.count;
+    const momentum = Math.round((tag.avgLikes + tag.avgShares) / 10000);
+    let quadrant = 'cold';
+    if (competition >= countThreshold && tag.avgHeat > overallAvgHeat) quadrant = 'red';
+    if (competition < countThreshold && tag.avgHeat > overallAvgHeat) quadrant = 'blue';
+    if (competition >= countThreshold && tag.avgHeat <= overallAvgHeat) quadrant = 'inner';
+    return { ...tag, competition, momentum, quadrant };
+  });
+}
+
+function buildRemotionSegments(items, rankDate, aiChartNarrations) {
+  const top1 = items[0];
+  const top2 = items[1];
+  const darkHorseData = buildDarkHorseData(items, rankDate);
+  const darkHorseChampion = darkHorseData[0];
+  const darkHorseRunner = darkHorseData[1];
+  const darkHorseThird = darkHorseData[2];
+  const tagData = analyzeRemotionTags(items).sort((a, b) => b.avgHeat - a.avgHeat).slice(0, 6);
+  const topTag = tagData[0];
+  const secondTag = tagData[1];
+  const thirdTag = tagData[2];
+  const oceanData = buildOceanData(items).slice(0, 8);
+  const blueTags = oceanData.filter(item => item.quadrant === 'blue');
+  const redTags = oceanData.filter(item => item.quadrant === 'red');
+  const blueLead = blueTags[0];
+  const blueSecond = blueTags[1];
+  const redLead = redTags[0];
+
+  const remotionDefs = [
+    {
+      file: 'douyin_top10_ranking.mp4',
+      label: '📊 前十总览',
+      chartType: 'chart_top10',
+      text: `先看前十总览。冠军是${extractCleanTitle(top1?.title || '') || '本期冠军'}，亚军是${extractCleanTitle(top2?.title || '') || '第二名'}。头部热度已经明显拉开。`,
+    },
+    {
+      file: 'douyin_darkhorse.mp4',
+      label: '🚀 黑马飙升',
+      chartType: 'chart_darkhorse',
+      text: `再看黑马飙升榜。冲得最快的是${extractCleanTitle(darkHorseChampion?.title || '') || '黑马冠军'}，发布${darkHorseChampion?.days || 1}天，日均互动约${fmtNum(darkHorseChampion?.dailyEngagement || 0)}。后面是${extractCleanTitle(darkHorseRunner?.title || '') || '第二名'}${darkHorseThird ? `和${extractCleanTitle(darkHorseThird.title || '')}` : ''}。`,
+    },
+    {
+      file: 'douyin_track_strength.mp4',
+      label: '📈 赛道实力',
+      chartType: 'chart_kline',
+      text: `赛道实力榜里，最强的是${topTag?.name || '头部赛道'}，第二是${secondTag?.name || '第二赛道'}${thirdTag ? `，第三是${thirdTag.name}` : ''}。热度主要集中在这几类题材。`,
+    },
+    {
+      file: 'douyin_ocean_matrix.mp4',
+      label: '🌊 机会矩阵',
+      chartType: 'chart_ocean',
+      text: `最后看机会矩阵。蓝海机会更值得盯的是${blueLead?.name || '细分题材'}${blueSecond ? `和${blueSecond.name}` : ''}，红海最挤的是${redLead?.name || '头部热门题材'}。想冲榜，先别扎进最拥挤的赛道。`,
+    },
+  ];
+
+  return remotionDefs
+    .map(def => {
+      const videoPath = path.join(REMOTION_OUT_DIR, def.file);
+      if (!fs.existsSync(videoPath)) return null;
+      // 优先使用AI文案，否则模板文案
+      const aiText = aiChartNarrations ? aiChartNarrations.get(def.chartType) : null;
+      if (aiText) console.log(`  🤖 ${def.label} → AI文案`);
+      return {
+        type: 'chart',
+        text: aiText || def.text,
+        duration: getVideoDuration(videoPath) || 10,
+        chartVideoPath: videoPath,
+        chartLabel: def.label,
+        ranking: 0,
+      };
+    })
+    .filter(Boolean);
+}
+
+async function renderRemotionCharts(items, rankDate, aiChartNarrations) {
+  if (!fs.existsSync(REMOTION_DIR)) {
+    console.log('  ⚠️ Remotion目录不存在');
+    return [];
+  }
+  console.log('  🎬 渲染Remotion后半段模版...');
+  await runAsync(`cd "${REMOTION_DIR}" && npm run render:all`);
+  const segs = buildRemotionSegments(items, rankDate, aiChartNarrations);
+  if (segs.length) console.log(`  ✅ Remotion后半段完成 (${segs.length} 段)`);
+  return segs;
+}
+
 /* ==================== MAIN ==================== */
 
 async function main() {
@@ -1093,31 +1253,17 @@ async function main() {
   }
   console.log(`  🎬 ${linked}/${segments.filter(s => s.aweme_id).length} 个`);
 
-  console.log('\n📊 Step 4: 生成动画图表');
+  console.log('\n📊 Step 4: 生成Remotion动画图表');
   try {
-    const chartResults = await renderCharts(ranking.items, TEMP_DIR, ranking.date);
-    if (chartResults.length) {
-      // 所有图表（黑马+K线+红海蓝海）→ 统一插在 outro 之前
+    const chartSegs = await renderRemotionCharts(ranking.items, ranking.date, aiChartNarrations);
+    if (chartSegs.length) {
       const outroIdx = segments.findIndex(s => s.type === 'outro');
       const trendIdx = segments.findIndex(s => s.type === 'trend');
       const insertAt = outroIdx >= 0 ? outroIdx : (trendIdx >= 0 ? trendIdx : segments.length - 1);
-      const chartSegs = chartResults.map(cr => {
-        // 优先使用AI生成的文案，否则回退到chart-renderer模板文案
-        const aiText = aiChartNarrations.get(cr.type);
-        if (aiText) {
-          console.log(`  🤖 ${cr.label} → AI文案`);
-        }
-        return {
-          type: 'chart',
-          text: aiText || cr.narration,
-          duration: 12,
-          chartVideoPath: cr.videoPath,
-          chartLabel: cr.label,
-          ranking: 0,
-        };
-      });
       segments.splice(insertAt, 0, ...chartSegs);
       console.log(`  ✅ 插入 ${chartSegs.length} 个图表段（outro前）`);
+    } else {
+      console.log('  ⚠️ Remotion未生成任何图表');
     }
   } catch (e) {
     console.log(`  ⚠️ 图表生成跳过: ${(e.message || '').substring(0, 200)}`);
