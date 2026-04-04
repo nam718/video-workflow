@@ -7,10 +7,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // MediaCrawler 数据目录（合并所有 search_contents 文件）
 const MC_DIR = '/Users/nanhaoquan/video-workflow/MediaCrawler/data/douyin/json';
 const srcFiles = fs.readdirSync(MC_DIR)
-  .filter(f => f.startsWith('search_contents_') && f.endsWith('.json'))
+  .filter(f => /^search_contents_\d{4}-\d{2}-\d{2}\.json$/.test(f))
   .sort();
 if (!srcFiles.length) { console.error('❌ 未找到 MediaCrawler 搜索数据'); process.exit(1); }
-const DATE = new Date().toISOString().slice(0, 10);
+const DATE = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
 const OUT = path.join(__dirname, 'data', `douyin_ai_ranking_${DATE}.json`);
 
 // 合并所有数据源
@@ -23,7 +23,7 @@ for (const f of srcFiles) {
 console.log(`📅 日期: ${DATE} | 合并: ${data.length} 条`);
 
 // 只保留最近2天发布的（3/18凌晨起）
-const RECENT_DAYS = 2;
+const RECENT_DAYS = 4;
 const cutoffTs = new Date(DATE + 'T00:00:00+08:00').getTime() / 1000 - RECENT_DAYS * 86400;
 data = data.filter(d => parseInt(d.create_time || 0, 10) >= cutoffTs);
 console.log(`📌 最近${RECENT_DAYS}天内发布: ${data.length} 条`);

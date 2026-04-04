@@ -19,7 +19,7 @@ const DATE = dateMatch ? dateMatch[1] : '';
 // MediaCrawler 原始数据（合并所有文件，含 video_download_url）
 const MC_DIR = '/Users/nanhaoquan/video-workflow/MediaCrawler/data/douyin/json';
 const srcFiles = fs.readdirSync(MC_DIR)
-  .filter(f => f.startsWith('search_contents_') && f.endsWith('.json'))
+  .filter(f => /^search_contents_\d{4}-\d{2}-\d{2}\.json$/.test(f))
   .sort();
 
 console.log(`📂 排行: ${rankFile}`);
