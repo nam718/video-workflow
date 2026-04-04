@@ -707,7 +707,7 @@ async function makeRankingSegment(seg, outPath, dur) {
   const cmd = [
     `ffmpeg -y -stream_loop -1 -i "${seg.clipPath}"`,
     seg.audioPath ? `-i "${seg.audioPath}"` : '',
-    `-t ${dur + 0.3}`,
+    `-t ${dur}`,
     `-filter_complex "${filters.join(';')}"`,
     `-map "[final]"`,
     seg.audioPath ? `-map 1:a` : `-an`,
@@ -720,13 +720,22 @@ async function makeRankingSegment(seg, outPath, dur) {
 }
 
 // 图表片段 (K线/红海蓝海矩阵)
-async function makeChartSegment(seg, outPath, dur) {
+// 以 Remotion 图表视频的时长为准，TTS 用 atempo 拉伸匹配
+async function makeChartSegment(seg, outPath, ttsDur) {
+  const chartDur = getVideoDuration(seg.chartVideoPath) || ttsDur;
+  const dur = chartDur; // 以图表动画时长为准
+
   const cues = writeCueFiles(
     path.basename(outPath, '.mp4'),
     parseSrtCues(seg.subtitlePath, dur).length ? parseSrtCues(seg.subtitlePath, dur) : buildSubtitleCues(seg.text, dur)
   );
 
   const lbl = esc(seg.chartLabel || '📊 趋势分析');
+
+  // 计算 atempo 让 TTS 音频拉伸到图表视频时长
+  const tempo = (seg.audioPath && ttsDur > 0 && Math.abs(chartDur - ttsDur) > 0.2)
+    ? Math.max(0.5, Math.min(2.0, ttsDur / chartDur))
+    : 1.0;
 
   const filters = [
     // 图表视频放入视频区
@@ -736,17 +745,21 @@ async function makeChartSegment(seg, outPath, dur) {
     ...topBarFilters('[_canvas]', videoTitleLabel, videoDateLabel),
     // 字幕
     ...subFilters('[_topbar]', cues, SUB_Y, 48),
-  ].join(';');
+  ];
+
+  // 如果需要拉伸音频，添加 atempo 滤镜
+  const audioFilter = tempo !== 1.0 ? `-af "atempo=${tempo.toFixed(4)}"` : '';
 
   const cmd = [
-    `ffmpeg -y -stream_loop -1 -i "${seg.chartVideoPath}"`,
+    `ffmpeg -y -i "${seg.chartVideoPath}"`,
     seg.audioPath ? `-i "${seg.audioPath}"` : '',
-    `-t ${dur + 0.3}`,
-    `-filter_complex "${filters}"`,
+    `-t ${dur}`,
+    `-filter_complex "${filters.join(';')}"`,
     `-map "[final]"`,
     seg.audioPath ? `-map 1:a` : `-an`,
     `-c:v libx264 -preset fast -crf 23`,
     seg.audioPath ? `-c:a aac -b:a 128k` : '',
+    audioFilter,
     `-r 30 -pix_fmt yuv420p`,
     `"${outPath}"`,
   ].filter(Boolean).join(' ');
@@ -773,7 +786,7 @@ async function makeTextSegment(seg, outPath, dur, posterFrame) {
   const cmd = [
     `ffmpeg -y -loop 1 -i "${posterFrame}"`,
     seg.audioPath ? `-i "${seg.audioPath}"` : '',
-    `-t ${dur + 0.3}`,
+    `-t ${dur}`,
     `-filter_complex "${filters}"`,
     `-map "[final]"`,
     seg.audioPath ? `-map 1:a` : `-an`,
@@ -836,7 +849,7 @@ async function makeIntroMontage(segments, introSeg, outPath) {
   const cmd = [
     `ffmpeg -y -stream_loop -1 -i "${rawMontage}"`,
     introSeg.audioPath ? `-i "${introSeg.audioPath}"` : '',
-    `-t ${dur + 0.3}`,
+    `-t ${dur}`,
     `-filter_complex "${filters}"`,
     `-map "[final]"`,
     introSeg.audioPath ? `-map 1:a` : `-an`,
@@ -883,7 +896,8 @@ async function compositeAll(segments, posterFrame) {
         const src = seg.type === 'intro' ? 'montage'
           : seg.type === 'chart' ? 'chart'
           : seg.clipPath ? 'video' : 'poster';
-        console.log(`  ✅ part_${i} (${src} ${dur.toFixed(1)}s)`);
+        const actualDur = getVideoDuration(outPath) || dur;
+        console.log(`  ✅ part_${i} (${src} ${actualDur.toFixed(1)}s)`);
       } else {
         console.log(`  ❌ part_${i} 生成失败`);
       }
